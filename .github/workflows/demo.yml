@@ -53,7 +53,8 @@ jobs:
           echo "═══════════════════════════════════════════════════════"
           echo "  PHASE 1 — CSV Box Scores for ${{ github.event.inputs.csv_date }}"
           echo "═══════════════════════════════════════════════════════"
-          mkdir -p output/csv output/json
+          mkdir -p output/csv output/json output/dat
+          chmod -R 777 output
           docker run --rm \
             -v "$(pwd)/output:/app/output" \
             ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
@@ -81,6 +82,7 @@ jobs:
           echo "  PHASE 2 — .dat File for ${{ github.event.inputs.dat_date }}"
           echo "═══════════════════════════════════════════════════════"
           mkdir -p output/dat
+          chmod -R 777 output
           docker run --rm \
             -v "$(pwd)/output:/app/output" \
             ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
@@ -111,10 +113,14 @@ jobs:
             echo "⚠️  No CSV file found — skipping Phase 3"
             exit 0
           fi
+          # CSV_FILE is relative like output/csv/mlb_games_2025.csv
+          # Inside the container it will be /app/output/csv/mlb_games_2025.csv
+          CONTAINER_CSV="/app/${CSV_FILE}"
+          chmod -R 777 output
           docker run --rm \
             -v "$(pwd)/output:/app/output" \
             ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-            db --csv "/app/$CSV_FILE"
+            db --csv "${CONTAINER_CSV}"
           echo ""
           echo "📄 Database file:"
           ls -lh output/*.db 2>/dev/null || ls -lh *.db 2>/dev/null || echo "(DB created inside container)"
