@@ -3,22 +3,32 @@
 # ============================================================================
 # Click "Run workflow" to generate real MLB data.
 # The pipeline runs inside a pre-built Docker container — no source code here.
-# After ~90 seconds, download the output artifacts (CSV + .dat + SQLite).
+# After ~3 minutes, download the output artifacts (CSV + .dat + SQLite).
 # ============================================================================
 name: "▶️ Run MLB Pipeline Demo"
 
 on:
   workflow_dispatch:
     inputs:
-      csv_date:
-        description: "Phase 1 CSV — game date (YYYY-MM-DD)"
+      csv_start:
+        description: "Phase 1 CSV — start date (YYYY-MM-DD)"
         required: true
         default: "2025-04-01"
         type: string
-      dat_date:
-        description: "Phase 2 .dat — game date (YYYY-MM-DD)"
+      csv_end:
+        description: "Phase 1 CSV — end date (YYYY-MM-DD)"
+        required: true
+        default: "2025-04-07"
+        type: string
+      dat_start:
+        description: "Phase 2 .dat — start date (YYYY-MM-DD)"
         required: true
         default: "2022-09-01"
+        type: string
+      dat_end:
+        description: "Phase 2 .dat — end date (YYYY-MM-DD)"
+        required: true
+        default: "2022-09-03"
         type: string
 
 jobs:
@@ -55,12 +65,13 @@ jobs:
           docker images ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
 
       # ---------------------------------------------------------------
-      # Phase 1 — 57-column CSV box scores
+      # Phase 1 — 57-column CSV box scores (date range)
       # ---------------------------------------------------------------
-      - name: "📊 Phase 1: Generate CSV box scores (${{ github.event.inputs.csv_date }})"
+      - name: "📊 Phase 1: Generate CSV box scores (${{ github.event.inputs.csv_start }} to ${{ github.event.inputs.csv_end }})"
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "  PHASE 1 — CSV Box Scores for ${{ github.event.inputs.csv_date }}"
+          echo "  PHASE 1 — CSV Box Scores"
+          echo "  Date range: ${{ github.event.inputs.csv_start }} → ${{ github.event.inputs.csv_end }}"
           echo "═══════════════════════════════════════════════════════"
           mkdir -p output/csv output/json output/dat
           chmod 777 output output/csv output/json output/dat
@@ -68,8 +79,8 @@ jobs:
             -v "$(pwd)/output:/app/output" \
             ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
             csv --season 2025 \
-            --start-date ${{ github.event.inputs.csv_date }} \
-            --end-date ${{ github.event.inputs.csv_date }}
+            --start-date ${{ github.event.inputs.csv_start }} \
+            --end-date ${{ github.event.inputs.csv_end }}
           echo ""
           echo "📄 Output files:"
           ls -lh output/csv/
@@ -83,31 +94,48 @@ jobs:
           fi
 
       # ---------------------------------------------------------------
-      # Phase 2 — Structured .dat text files
+      # Phase 2 — Structured .dat text files (date range)
       # ---------------------------------------------------------------
-      - name: "📝 Phase 2: Generate .dat structured text (${{ github.event.inputs.dat_date }})"
+      - name: "📝 Phase 2: Generate .dat structured text (${{ github.event.inputs.dat_start }} to ${{ github.event.inputs.dat_end }})"
         run: |
           echo "═══════════════════════════════════════════════════════"
-          echo "  PHASE 2 — .dat File for ${{ github.event.inputs.dat_date }}"
+          echo "  PHASE 2 — .dat Structured Text Files"
+          echo "  Date range: ${{ github.event.inputs.dat_start }} → ${{ github.event.inputs.dat_end }}"
           echo "═══════════════════════════════════════════════════════"
           mkdir -p output/dat
           chmod 777 output/dat
-          docker run --rm \
-            -v "$(pwd)/output:/app/output" \
-            ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-            dat --date ${{ github.event.inputs.dat_date }}
+
+          # Loop through each date in the range
+          START="${{ github.event.inputs.dat_start }}"
+          END="${{ github.event.inputs.dat_end }}"
+          CURRENT="$START"
+          while [[ "$CURRENT" < "$END" ]] || [[ "$CURRENT" == "$END" ]]; do
+            echo ""
+            echo "--- Generating .dat for $CURRENT ---"
+            docker run --rm \
+              -v "$(pwd)/output:/app/output" \
+              ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
+              dat --date "$CURRENT" || true
+            CURRENT=$(date -d "$CURRENT + 1 day" +%Y-%m-%d)
+          done
+
           echo ""
           echo "📄 Output files:"
           ls -lh output/dat/
           echo ""
-          if ls output/dat/*.dat 1>/dev/null 2>&1; then
-            echo "Preview (first 40 lines):"
-            head -40 output/dat/*.dat
-            echo ""
-            DAT_FILE=$(ls output/dat/*.dat | head -1)
-            echo "Total lines: $(wc -l < $DAT_FILE)"
-            echo "Games in file: $(grep -c '=====' $DAT_FILE || echo 0)"
-          fi
+          TOTAL_LINES=0
+          TOTAL_GAMES=0
+          for f in output/dat/*.dat; do
+            if [ -f "$f" ]; then
+              LINES=$(wc -l < "$f")
+              GAMES=$(grep -c '==================' "$f" || echo 0)
+              echo "  $f: $LINES lines, $GAMES games"
+              TOTAL_LINES=$((TOTAL_LINES + LINES))
+              TOTAL_GAMES=$((TOTAL_GAMES + GAMES))
+            fi
+          done
+          echo ""
+          echo "Total: $TOTAL_LINES lines across $TOTAL_GAMES games"
 
       # ---------------------------------------------------------------
       # Phase 3 — SQLite database + reports
@@ -185,22 +213,52 @@ jobs:
           echo "  ✅ MLB DATA PIPELINE — DEMO COMPLETE"
           echo "═══════════════════════════════════════════════════════"
           echo ""
-          echo "  📊 Phase 1 CSV:  $(ls output/csv/*.csv 2>/dev/null || echo 'N/A')"
-          echo "  📝 Phase 2 .dat: $(ls output/dat/*.dat 2>/dev/null || echo 'N/A')"
-          echo "  📂 Raw JSON:     $(ls output/json/*.json 2>/dev/null | wc -l) files"
+          CSV_ROWS=0
+          if ls output/csv/*.csv 1>/dev/null 2>&1; then
+            CSV_FILE=$(ls output/csv/*.csv | head -1)
+            CSV_ROWS=$(tail -n +2 "$CSV_FILE" | wc -l)
+            CSV_COLS=$(head -1 "$CSV_FILE" | tr ',' '\n' | wc -l)
+            echo "  📊 Phase 1 CSV:  $CSV_FILE ($CSV_ROWS games, $CSV_COLS columns)"
+          else
+            echo "  📊 Phase 1 CSV:  N/A"
+          fi
+          echo ""
+          DAT_COUNT=0
+          DAT_LINES=0
+          if ls output/dat/*.dat 1>/dev/null 2>&1; then
+            for f in output/dat/*.dat; do
+              DAT_COUNT=$((DAT_COUNT + 1))
+              DAT_LINES=$((DAT_LINES + $(wc -l < "$f")))
+            done
+            echo "  📝 Phase 2 .dat: $DAT_COUNT files, $DAT_LINES total lines"
+            ls -lh output/dat/*.dat | while read line; do echo "     $line"; done
+          else
+            echo "  📝 Phase 2 .dat: N/A"
+          fi
+          echo ""
+          JSON_COUNT=$(ls output/json/*.json 2>/dev/null | wc -l)
+          echo "  📂 Raw JSON:     $JSON_COUNT API response files"
+          echo ""
+          if ls output/*.db 1>/dev/null 2>&1; then
+            DB_FILE=$(ls output/*.db | head -1)
+            DB_SIZE=$(ls -lh "$DB_FILE" | awk '{print $5}')
+            echo "  🗄️  Phase 3 DB:  $DB_FILE ($DB_SIZE)"
+          else
+            echo "  🗄️  Phase 3 DB:  N/A"
+          fi
           echo ""
           echo "  Download the artifacts above ⬆️ to inspect the output."
           echo "═══════════════════════════════════════════════════════"
 
           # GitHub Step Summary (rich markdown in Actions tab)
-          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          cat >> $GITHUB_STEP_SUMMARY << EOF
           ## ⚾ MLB Data Pipeline — Demo Results
 
-          | Phase | Output | Status |
-          |-------|--------|--------|
-          | **Phase 1** | CSV box scores (57 columns) | ✅ |
-          | **Phase 2** | .dat structured text | ✅ |
-          | **Phase 3** | SQLite database | ✅ |
+          | Phase | Output | Details |
+          |-------|--------|---------|
+          | **Phase 1** | CSV box scores (57 columns) | ${CSV_ROWS:-0} games |
+          | **Phase 2** | .dat structured text | ${DAT_COUNT:-0} files, ${DAT_LINES:-0} lines |
+          | **Phase 3** | SQLite database | Ingested from CSV |
 
           ### 📥 Download the artifacts above to inspect the output files.
 
