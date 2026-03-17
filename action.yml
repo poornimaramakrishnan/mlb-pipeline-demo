@@ -1,0 +1,55 @@
+# ============================================================================
+# MLB Data Pipeline — GitHub Action (Docker-based)
+# ============================================================================
+# This action runs the MLB Data Pipeline inside a pre-built Docker container.
+# The source code is compiled into the Docker image — not exposed here.
+# ============================================================================
+name: "MLB Data Pipeline"
+description: "Generate MLB box-score data (CSV + .dat + SQLite) from the MLB Stats API"
+author: "Poornima Ramakrishnan"
+
+branding:
+  icon: "database"
+  color: "blue"
+
+inputs:
+  command:
+    description: "Pipeline command: csv, dat, or db"
+    required: true
+    default: "csv"
+  season:
+    description: "Season year (for csv command)"
+    required: false
+    default: "2025"
+  date:
+    description: "Game date YYYY-MM-DD (for dat command)"
+    required: false
+    default: "2022-09-01"
+  csv-file:
+    description: "Path to CSV file (for db command)"
+    required: false
+    default: ""
+  start-date:
+    description: "Start date YYYY-MM-DD (overrides season start)"
+    required: false
+    default: ""
+  end-date:
+    description: "End date YYYY-MM-DD (overrides season end)"
+    required: false
+    default: ""
+
+outputs:
+  csv-path:
+    description: "Path to generated CSV file"
+  dat-path:
+    description: "Path to generated .dat file"
+  db-path:
+    description: "Path to generated SQLite database"
+  games-count:
+    description: "Number of games processed"
+
+runs:
+  using: "docker"
+  image: "docker://ghcr.io/poornimaramakrishnan/mlb-pipeline:latest"
+  args:
+    - ${{ inputs.command }}

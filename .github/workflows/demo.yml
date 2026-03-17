@@ -1,0 +1,194 @@
+# ============================================================================
+# MLB Data Pipeline — Live Demo (Public)
+# ============================================================================
+# Click "Run workflow" to generate real MLB data.
+# The pipeline runs inside a pre-built Docker container — no source code here.
+# After ~90 seconds, download the output artifacts (CSV + .dat + SQLite).
+# ============================================================================
+name: "▶️ Run MLB Pipeline Demo"
+
+on:
+  workflow_dispatch:
+    inputs:
+      csv_date:
+        description: "Phase 1 CSV — game date (YYYY-MM-DD)"
+        required: true
+        default: "2025-04-01"
+        type: string
+      dat_date:
+        description: "Phase 2 .dat — game date (YYYY-MM-DD)"
+        required: true
+        default: "2022-09-01"
+        type: string
+
+jobs:
+  demo:
+    name: "🔄 Generate MLB Pipeline Output"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Required to pull from GHCR
+    permissions:
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # Pull the pre-built pipeline image
+      # ---------------------------------------------------------------
+      - name: "🐳 Pull MLB Pipeline Docker image"
+        run: |
+          echo "Pulling pre-built pipeline image from GitHub Container Registry..."
+          docker pull ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
+          echo "✅ Image pulled successfully"
+          echo ""
+          docker images ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
+
+      # ---------------------------------------------------------------
+      # Phase 1 — 57-column CSV box scores
+      # ---------------------------------------------------------------
+      - name: "📊 Phase 1: Generate CSV box scores (${{ github.event.inputs.csv_date }})"
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "  PHASE 1 — CSV Box Scores for ${{ github.event.inputs.csv_date }}"
+          echo "═══════════════════════════════════════════════════════"
+          mkdir -p output/csv output/json
+          docker run --rm \
+            -v "$(pwd)/output:/app/output" \
+            ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
+            csv --season 2025 \
+            --start-date ${{ github.event.inputs.csv_date }} \
+            --end-date ${{ github.event.inputs.csv_date }}
+          echo ""
+          echo "📄 Output files:"
+          ls -lh output/csv/
+          echo ""
+          if ls output/csv/*.csv 1>/dev/null 2>&1; then
+            echo "Preview (first 5 rows):"
+            head -6 output/csv/*.csv | column -t -s,
+            echo ""
+            echo "Column count: $(head -1 output/csv/*.csv | tr ',' '\n' | wc -l)"
+            echo "Row count: $(tail -n +2 output/csv/*.csv | wc -l)"
+          fi
+
+      # ---------------------------------------------------------------
+      # Phase 2 — Structured .dat text files
+      # ---------------------------------------------------------------
+      - name: "📝 Phase 2: Generate .dat structured text (${{ github.event.inputs.dat_date }})"
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "  PHASE 2 — .dat File for ${{ github.event.inputs.dat_date }}"
+          echo "═══════════════════════════════════════════════════════"
+          mkdir -p output/dat
+          docker run --rm \
+            -v "$(pwd)/output:/app/output" \
+            ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
+            dat --date ${{ github.event.inputs.dat_date }}
+          echo ""
+          echo "📄 Output files:"
+          ls -lh output/dat/
+          echo ""
+          if ls output/dat/*.dat 1>/dev/null 2>&1; then
+            echo "Preview (first 40 lines):"
+            head -40 output/dat/*.dat
+            echo ""
+            DAT_FILE=$(ls output/dat/*.dat | head -1)
+            echo "Total lines: $(wc -l < $DAT_FILE)"
+            echo "Games in file: $(grep -c '=====' $DAT_FILE || echo 0)"
+          fi
+
+      # ---------------------------------------------------------------
+      # Phase 3 — SQLite database + reports
+      # ---------------------------------------------------------------
+      - name: "🗄️ Phase 3: Ingest into SQLite + run reports"
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "  PHASE 3 — Database Ingestion & Reporting"
+          echo "═══════════════════════════════════════════════════════"
+          CSV_FILE=$(ls output/csv/*.csv 2>/dev/null | head -1)
+          if [ -z "$CSV_FILE" ]; then
+            echo "⚠️  No CSV file found — skipping Phase 3"
+            exit 0
+          fi
+          docker run --rm \
+            -v "$(pwd)/output:/app/output" \
+            ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
+            db --csv "/app/$CSV_FILE"
+          echo ""
+          echo "📄 Database file:"
+          ls -lh output/*.db 2>/dev/null || ls -lh *.db 2>/dev/null || echo "(DB created inside container)"
+
+      # ---------------------------------------------------------------
+      # Upload artifacts for download
+      # ---------------------------------------------------------------
+      - name: "📦 Upload CSV output"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase1-csv-boxscores
+          path: output/csv/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: "📦 Upload .dat output"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase2-dat-structured-text
+          path: output/dat/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: "📦 Upload raw JSON (audit trail)"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: raw-json-api-responses
+          path: output/json/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: "📦 Upload SQLite database"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase3-sqlite-database
+          path: |
+            output/*.db
+            *.db
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ---------------------------------------------------------------
+      # Summary
+      # ---------------------------------------------------------------
+      - name: "✅ Summary"
+        if: always()
+        run: |
+          echo "═══════════════════════════════════════════════════════"
+          echo "  ✅ MLB DATA PIPELINE — DEMO COMPLETE"
+          echo "═══════════════════════════════════════════════════════"
+          echo ""
+          echo "  📊 Phase 1 CSV:  $(ls output/csv/*.csv 2>/dev/null || echo 'N/A')"
+          echo "  📝 Phase 2 .dat: $(ls output/dat/*.dat 2>/dev/null || echo 'N/A')"
+          echo "  📂 Raw JSON:     $(ls output/json/*.json 2>/dev/null | wc -l) files"
+          echo ""
+          echo "  Download the artifacts above ⬆️ to inspect the output."
+          echo "═══════════════════════════════════════════════════════"
+
+          # GitHub Step Summary (rich markdown in Actions tab)
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          ## ⚾ MLB Data Pipeline — Demo Results
+
+          | Phase | Output | Status |
+          |-------|--------|--------|
+          | **Phase 1** | CSV box scores (57 columns) | ✅ |
+          | **Phase 2** | .dat structured text | ✅ |
+          | **Phase 3** | SQLite database | ✅ |
+
+          ### 📥 Download the artifacts above to inspect the output files.
+
+          > **Note:** This pipeline runs inside a pre-built Docker container.
+          > The source code is not included in this repository.
+          EOF
