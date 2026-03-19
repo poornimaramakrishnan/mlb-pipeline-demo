@@ -44,7 +44,8 @@ human-readable fixed-width format suitable for legacy system ingestion.
    | `season` | All games in a season | `csv_season` |
    | `game-ids` | Specific games by ID | `csv_game_ids` (space-separated) |
 
-4. Optionally change the **Phase 2 .dat date** (default: `2022-09-01`).
+4. Optionally change the **Phase 2 .dat date range** (default: `2022-09-01` to `2022-09-03`).
+   Leave `dat_end_date` blank (or equal to `dat_start_date`) to generate a single day.
 5. Wait ~60–90 seconds for the workflow to complete.
 6. Download the **artifacts** from the workflow run:
 
