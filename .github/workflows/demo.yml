@@ -188,12 +188,32 @@ jobs:
           done
           echo "Total: $TOTAL_LINES lines / $TOTAL_GAMES games"
 
+      # ── Artifact label (mode-aware) ───────────────────────────────────────
+      - name: "Compute artifact label"
+        if: always()
+        run: |
+          END_RESOLVED="${END_DATE:-$START_DATE}"
+          case "$MODE" in
+            date-range)
+              LABEL="${START_DATE}_to_${END_RESOLVED}" ;;
+            single-date)
+              LABEL="${START_DATE}" ;;
+            season)
+              LABEL="season_${SEASON}" ;;
+            game-ids)
+              LABEL="games_$(echo "$GAME_IDS" | tr ' ' '-')" ;;
+            *)
+              LABEL="${START_DATE}" ;;
+          esac
+          echo "ARTIFACT_LABEL=$LABEL" >> "$GITHUB_ENV"
+          echo "Artifact label: $LABEL"
+
       # ── Artifacts ─────────────────────────────────────────────────────────
       - name: "Upload Phase 1 CSV"
         uses: actions/upload-artifact@v4
         if: ${{ always() && github.event.inputs.run_phase1 == 'true' }}
         with:
-          name: "phase1-csv-${{ github.event.inputs.mode }}-${{ github.event.inputs.start_date }}"
+          name: "phase1-csv-${{ github.event.inputs.mode }}-${{ env.ARTIFACT_LABEL }}"
           path: output/csv/
           retention-days: 30
           if-no-files-found: warn
@@ -202,7 +222,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() && github.event.inputs.run_phase2 == 'true' }}
         with:
-          name: "phase2-dat-${{ github.event.inputs.start_date }}"
+          name: "phase2-dat-${{ env.ARTIFACT_LABEL }}"
           path: output/dat/
           retention-days: 30
           if-no-files-found: warn
@@ -211,7 +231,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: "raw-json-${{ github.event.inputs.start_date }}"
+          name: "raw-json-${{ env.ARTIFACT_LABEL }}"
           path: output/json/
           retention-days: 30
           if-no-files-found: warn
