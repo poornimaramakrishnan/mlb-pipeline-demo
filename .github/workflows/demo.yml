@@ -127,6 +127,9 @@ jobs:
           fi
 
       - name: "Phase 2: Generate .dat structured text (${{ github.event.inputs.dat_start_date }} to ${{ github.event.inputs.dat_end_date || github.event.inputs.dat_start_date }})"
+        env:
+          DAT_START: ${{ github.event.inputs.dat_start_date }}
+          DAT_END:   ${{ github.event.inputs.dat_end_date }}
         run: |
           # Resolve end date: default to start date for a single-day run
           DAT_END_RESOLVED="${DAT_END:-$DAT_START}"
@@ -134,7 +137,7 @@ jobs:
           mkdir -p output/dat && chmod 777 output/dat
 
           CURRENT="$DAT_START"
-          while [[ "$CURRENT" <= "$DAT_END_RESOLVED" ]]; do
+          while [[ "$CURRENT" < "$DAT_END_RESOLVED" || "$CURRENT" == "$DAT_END_RESOLVED" ]]; do
             echo "--- Generating .dat for $CURRENT ---"
             docker run --rm -v "$(pwd)/output:/app/output" \
               ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
