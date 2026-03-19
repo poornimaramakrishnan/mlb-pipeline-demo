@@ -1,144 +1,175 @@
-# ============================================================================
+# =============================================================================
 # MLB Data Pipeline -- Live Demo (Public)
-# ============================================================================
-# Click "Run workflow" to generate real MLB data.
-# The pipeline runs inside a pre-built Docker container -- no source code here.
-# After ~2 minutes, download the output artifacts (CSV + .dat).
+# =============================================================================
 #
-# Phase 1 modes
-# -------------
-#   single-date  -> one date          (csv_start_date only)
-#   date-range   -> start -> end      (csv_start_date + csv_end_date)
-#   season       -> full season       (csv_season)
-#   game-ids     -> specific gamePks  (csv_game_ids, space-separated)
-# ============================================================================
+# HOW TO USE
+# ----------
+# 1. Click "Run workflow" (green button, top-right of the Actions list).
+# 2. Fill in the shared date / ID inputs (they apply to ALL selected phases).
+# 3. Tick the phases you want to run (Phase 1 CSV and/or Phase 2 .dat).
+# 4. Click the green "Run workflow" button.
+# 5. Download the artifacts when the run completes (~2 min).
+#
+# DATA SELECTION MODES (Phase 1 CSV)
+# -----------------------------------
+#   date-range   Uses start_date -> end_date  (default)
+#   single-date  Uses start_date only
+#   season       Uses season_year  (all games in the season)
+#   game-ids     Uses game_ids     (space-separated gamePk values)
+#
+# NOTE: Phase 2 .dat always uses start_date -> end_date (or start_date alone).
+# =============================================================================
 name: "Run MLB Pipeline Demo"
 
 on:
   workflow_dispatch:
     inputs:
-      phase1_mode:
-        description: "Phase 1 mode"
+
+      # ── What to run ──────────────────────────────────────────────────────
+      run_phase1:
+        description: "Phase 1 -- Generate CSV box scores (57 columns)"
+        type: boolean
+        default: true
+
+      run_phase2:
+        description: "Phase 2 -- Generate .dat structured text files"
+        type: boolean
+        default: true
+
+      # ── Data selection ───────────────────────────────────────────────────
+      mode:
+        description: "Data selection mode (applies to Phase 1 CSV)"
         required: true
-        default: "date-range"
         type: choice
+        default: "date-range"
         options:
-          - single-date
           - date-range
+          - single-date
           - season
           - game-ids
-      csv_season:
-        description: "Season year -- used when mode = season"
+
+      start_date:
+        description: "Start date  YYYY-MM-DD  (date-range / single-date)"
+        required: false
+        default: "2025-05-13"
+        type: string
+
+      end_date:
+        description: "End date    YYYY-MM-DD  (date-range; leave blank = same as start)"
+        required: false
+        default: "2025-05-21"
+        type: string
+
+      season_year:
+        description: "Season year  (mode = season only, e.g. 2025)"
         required: false
         default: "2025"
         type: string
-      csv_start_date:
-        description: "Start date (YYYY-MM-DD) -- used for single-date or date-range"
-        required: false
-        default: "2025-04-01"
-        type: string
-      csv_end_date:
-        description: "End date (YYYY-MM-DD) -- used for date-range (leave blank for single-date)"
-        required: false
-        default: "2025-04-07"
-        type: string
-      csv_game_ids:
-        description: "Space-separated gamePk values -- used when mode = game-ids"
+
+      game_ids:
+        description: "gamePk values  (mode = game-ids; space-separated, e.g. 777944 777940)"
         required: false
         default: ""
-        type: string
-      dat_start_date:
-        description: "Phase 2 .dat -- start date (YYYY-MM-DD)"
-        required: true
-        default: "2022-09-01"
-        type: string
-      dat_end_date:
-        description: "Phase 2 .dat -- end date (YYYY-MM-DD, leave blank for single day)"
-        required: false
-        default: "2022-09-03"
         type: string
 
 jobs:
   demo:
-    name: "Generate MLB Pipeline Output"
+    name: "MLB Pipeline"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     permissions:
       packages: read
 
     env:
-      MODE:         ${{ github.event.inputs.phase1_mode }}
-      CSV_SEASON:   ${{ github.event.inputs.csv_season }}
-      CSV_START:    ${{ github.event.inputs.csv_start_date }}
-      CSV_END:      ${{ github.event.inputs.csv_end_date }}
-      CSV_GAME_IDS: ${{ github.event.inputs.csv_game_ids }}
-      DAT_START:    ${{ github.event.inputs.dat_start_date }}
-      DAT_END:      ${{ github.event.inputs.dat_end_date }}
+      MODE:       ${{ github.event.inputs.mode }}
+      START_DATE: ${{ github.event.inputs.start_date }}
+      END_DATE:   ${{ github.event.inputs.end_date }}
+      SEASON:     ${{ github.event.inputs.season_year }}
+      GAME_IDS:   ${{ github.event.inputs.game_ids }}
+      RUN_P1:     ${{ github.event.inputs.run_phase1 }}
+      RUN_P2:     ${{ github.event.inputs.run_phase2 }}
 
     steps:
       - uses: actions/checkout@v4
 
+      # ── Docker image ──────────────────────────────────────────────────────
+      - name: "Pull MLB Pipeline Docker image"
+        run: |
+          echo "Pulling image from GitHub Container Registry..."
+          docker pull ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
+          docker images ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
+
+      # ── Output directories ────────────────────────────────────────────────
       - name: "Prepare output directories"
         run: |
           mkdir -p output/csv output/json output/dat
           chmod 777 output output/csv output/json output/dat
 
-      - name: "Pull MLB Pipeline Docker image"
+      # ── Phase 1 -- CSV box scores ─────────────────────────────────────────
+      - name: "Phase 1: CSV box scores  [mode=${{ github.event.inputs.mode }}]"
+        if: ${{ github.event.inputs.run_phase1 == 'true' }}
         run: |
-          echo "Pulling pre-built pipeline image from GitHub Container Registry..."
-          docker pull ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
-          echo "Image pulled successfully"
-          docker images ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
+          END_RESOLVED="${END_DATE:-$START_DATE}"
+          echo "====================================================="
+          echo "  PHASE 1 -- CSV Box Scores"
+          echo "  Mode      : $MODE"
+          echo "  Start     : $START_DATE"
+          echo "  End       : $END_RESOLVED"
+          echo "  Season    : $SEASON"
+          echo "  Game IDs  : ${GAME_IDS:-(n/a)}"
+          echo "====================================================="
 
-      - name: "Phase 1: Generate CSV box scores (mode: ${{ github.event.inputs.phase1_mode }})"
-        run: |
-          echo "  PHASE 1 -- CSV Box Scores  (Mode: $MODE)"
           case "$MODE" in
-            single-date)
-              docker run --rm -v "$(pwd)/output:/app/output" \
-                ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-                csv --start-date "$CSV_START"
-              ;;
             date-range)
               docker run --rm -v "$(pwd)/output:/app/output" \
                 ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-                csv --start-date "$CSV_START" --end-date "$CSV_END"
+                csv --start-date "$START_DATE" --end-date "$END_RESOLVED"
+              ;;
+            single-date)
+              docker run --rm -v "$(pwd)/output:/app/output" \
+                ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
+                csv --start-date "$START_DATE"
               ;;
             season)
               docker run --rm -v "$(pwd)/output:/app/output" \
                 ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-                csv --season "$CSV_SEASON"
+                csv --season "$SEASON"
               ;;
             game-ids)
+              # SC2086: intentional word-splitting on space-separated IDs
               # shellcheck disable=SC2086
               docker run --rm -v "$(pwd)/output:/app/output" \
                 ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-                csv --game-id $CSV_GAME_IDS
+                csv --game-id $GAME_IDS
               ;;
             *)
               echo "Unknown mode: $MODE"; exit 1 ;;
           esac
+
           echo ""
-          ls -lh output/csv/
           if ls output/csv/*.csv 1>/dev/null 2>&1; then
-            echo "Column count : $(head -1 output/csv/*.csv | tr ',' '\n' | wc -l)"
-            echo "Game row count: $(tail -n +2 output/csv/*.csv | wc -l)"
+            ls -lh output/csv/
+            echo "Columns   : $(head -1 output/csv/*.csv | tr ',' '\n' | wc -l)"
+            echo "Game rows : $(tail -n +2 output/csv/*.csv | wc -l)"
+          else
+            echo "No CSV produced for the selected input."
           fi
 
-      - name: "Phase 2: Generate .dat structured text (${{ github.event.inputs.dat_start_date }} to ${{ github.event.inputs.dat_end_date || github.event.inputs.dat_start_date }})"
-        env:
-          DAT_START: ${{ github.event.inputs.dat_start_date }}
-          DAT_END:   ${{ github.event.inputs.dat_end_date }}
+      # ── Phase 2 -- .dat structured text ──────────────────────────────────
+      - name: "Phase 2: .dat structured text  [${{ github.event.inputs.start_date }} -> ${{ github.event.inputs.end_date || github.event.inputs.start_date }}]"
+        if: ${{ github.event.inputs.run_phase2 == 'true' }}
         run: |
-          # Resolve end date: default to start date for a single-day run
-          DAT_END_RESOLVED="${DAT_END:-$DAT_START}"
-          echo "  PHASE 2 -- .dat Structured Text  ($DAT_START -> $DAT_END_RESOLVED)"
+          END_RESOLVED="${END_DATE:-$START_DATE}"
+          echo "====================================================="
+          echo "  PHASE 2 -- .dat Structured Text"
+          echo "  Range: $START_DATE -> $END_RESOLVED"
+          echo "====================================================="
           mkdir -p output/dat && chmod 777 output/dat
 
-          CURRENT="$DAT_START"
-          while [[ "$CURRENT" < "$DAT_END_RESOLVED" || "$CURRENT" == "$DAT_END_RESOLVED" ]]; do
-            echo "--- Generating .dat for $CURRENT ---"
+          CURRENT="$START_DATE"
+          while [[ "$CURRENT" < "$END_RESOLVED" || "$CURRENT" == "$END_RESOLVED" ]]; do
+            echo "--- $CURRENT ---"
             docker run --rm -v "$(pwd)/output:/app/output" \
               ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
               dat --date "$CURRENT" || true
@@ -146,32 +177,32 @@ jobs:
           done
 
           echo ""
-          ls -lh output/dat/
           TOTAL_LINES=0; TOTAL_GAMES=0
           for f in output/dat/*.dat; do
             [ -f "$f" ] || continue
             LINES=$(wc -l < "$f")
             GAMES=$(grep -c '==================' "$f" || true)
-            echo "  $f: $LINES lines, $GAMES games"
+            echo "  $f : $LINES lines, $GAMES games"
             TOTAL_LINES=$((TOTAL_LINES + LINES))
             TOTAL_GAMES=$((TOTAL_GAMES + GAMES))
           done
-          echo "Total: $TOTAL_LINES lines across $TOTAL_GAMES games"
+          echo "Total: $TOTAL_LINES lines / $TOTAL_GAMES games"
 
-      - name: "Upload CSV output"
+      # ── Artifacts ─────────────────────────────────────────────────────────
+      - name: "Upload Phase 1 CSV"
         uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && github.event.inputs.run_phase1 == 'true' }}
         with:
-          name: "phase1-csv-${{ github.event.inputs.phase1_mode }}"
+          name: "phase1-csv-${{ github.event.inputs.mode }}-${{ github.event.inputs.start_date }}"
           path: output/csv/
           retention-days: 30
           if-no-files-found: warn
 
-      - name: "Upload .dat output"
+      - name: "Upload Phase 2 .dat"
         uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && github.event.inputs.run_phase2 == 'true' }}
         with:
-          name: "phase2-dat-${{ github.event.inputs.dat_start_date }}"
+          name: "phase2-dat-${{ github.event.inputs.start_date }}"
           path: output/dat/
           retention-days: 30
           if-no-files-found: warn
@@ -180,41 +211,43 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: raw-json-api-responses
+          name: "raw-json-${{ github.event.inputs.start_date }}"
           path: output/json/
           retention-days: 30
           if-no-files-found: warn
 
+      # ── Summary ───────────────────────────────────────────────────────────
       - name: "Summary"
         if: always()
         run: |
           CSV_ROWS=0; CSV_COLS=0
           if ls output/csv/*.csv 1>/dev/null 2>&1; then
-            CSV_FILE=$(ls output/csv/*.csv | head -1)
-            CSV_ROWS=$(tail -n +2 "$CSV_FILE" | wc -l)
-            CSV_COLS=$(head -1 "$CSV_FILE" | tr ',' '\n' | wc -l)
-            echo "Phase 1 CSV: $CSV_FILE ($CSV_ROWS games, $CSV_COLS columns)"
+            F=$(ls output/csv/*.csv | head -1)
+            CSV_ROWS=$(tail -n +2 "$F" | wc -l)
+            CSV_COLS=$(head -1 "$F" | tr ',' '\n' | wc -l)
           fi
           DAT_COUNT=0; DAT_LINES=0
-          if ls output/dat/*.dat 1>/dev/null 2>&1; then
-            for f in output/dat/*.dat; do
-              DAT_COUNT=$((DAT_COUNT + 1))
-              DAT_LINES=$((DAT_LINES + $(wc -l < "$f")))
-            done
-            echo "Phase 2 .dat: $DAT_COUNT file(s), $DAT_LINES total lines"
-          fi
+          for f in output/dat/*.dat; do
+            [ -f "$f" ] || continue
+            DAT_COUNT=$((DAT_COUNT + 1))
+            DAT_LINES=$((DAT_LINES + $(wc -l < "$f")))
+          done
           JSON_COUNT=$(ls output/json/*.json 2>/dev/null | wc -l || echo 0)
-          echo "Raw JSON: $JSON_COUNT API response file(s)"
-          echo "Download the artifacts above to inspect the output."
           {
-            echo "## MLB Data Pipeline -- Demo Results"
+            echo "## MLB Data Pipeline -- Run Summary"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---------|-------|"
+            echo "| Mode | \`$MODE\` |"
+            echo "| Date range | \`$START_DATE\` to \`${END_DATE:-$START_DATE}\` |"
+            echo "| Phase 1 CSV | $RUN_P1 |"
+            echo "| Phase 2 .dat | $RUN_P2 |"
             echo ""
             echo "| Phase | Output | Details |"
             echo "|-------|--------|---------|"
-            echo "| **Phase 1** | CSV box scores (57 columns) | ${CSV_ROWS} games, ${CSV_COLS} columns |"
-            echo "| **Phase 2** | .dat structured text | ${DAT_COUNT} file(s), ${DAT_LINES} lines |"
+            echo "| Phase 1 | CSV box scores (57 cols) | ${CSV_ROWS} games, ${CSV_COLS} columns |"
+            echo "| Phase 2 | .dat structured text | ${DAT_COUNT} file(s), ${DAT_LINES} lines |"
+            echo "| JSON | Raw API responses | ${JSON_COUNT} file(s) |"
             echo ""
-            echo "**Mode:** \`${MODE}\`"
-            echo ""
-            echo "> Pipeline ran inside a pre-built Docker container."
+            echo "> Ran inside a pre-built Docker container -- no source code in this repo."
           } >> "$GITHUB_STEP_SUMMARY"

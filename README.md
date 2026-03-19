@@ -35,25 +35,48 @@ human-readable fixed-width format suitable for legacy system ingestion.
 1. Click the **[Run Demo](../../actions/workflows/demo.yml)** badge above
    (or go to the **Actions** tab → **"Run MLB Pipeline Demo"**).
 2. Click the green **"Run workflow"** button.
-3. Choose a **Phase 1 mode** from the dropdown:
+3. Configure your run using the inputs below:
 
-   | Mode | What it does | Key input(s) |
-   |------|-------------|-------------|
-   | `single-date` | One day of games | `csv_start_date` |
-   | `date-range` | Date span of games | `csv_start_date` + `csv_end_date` |
-   | `season` | All games in a season | `csv_season` |
-   | `game-ids` | Specific games by ID | `csv_game_ids` (space-separated) |
+### ☑️ Phase toggles (checkboxes)
 
-4. Optionally change the **Phase 2 .dat date range** (default: `2022-09-01` to `2022-09-03`).
-   Leave `dat_end_date` blank (or equal to `dat_start_date`) to generate a single day.
-5. Wait ~60–90 seconds for the workflow to complete.
-6. Download the **artifacts** from the workflow run:
+| Checkbox | What it enables |
+|----------|----------------|
+| ✅ **Phase 1** | Generate 57-column CSV box scores |
+| ✅ **Phase 2** | Generate `.dat` structured text files |
+
+Untick a phase to skip it entirely.
+
+### 📅 Shared data inputs (apply to all selected phases)
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| **mode** | How to select games (see below) | `date-range` |
+| **start_date** | Start date `YYYY-MM-DD` | `2025-05-13` |
+| **end_date** | End date `YYYY-MM-DD` (blank = same as start) | `2025-05-21` |
+| **season_year** | Full season year — only used when mode = `season` | `2025` |
+| **game_ids** | Space-separated gamePk values — only used when mode = `game-ids` | *(blank)* |
+
+> **No date picker available** in GitHub Actions — type the date directly in `YYYY-MM-DD` format (e.g. `2025-05-13`).
+
+### 🎛️ Data selection modes
+
+| Mode | Uses | Example |
+|------|------|---------|
+| `date-range` | `start_date` → `end_date` | May 13–21 2025 |
+| `single-date` | `start_date` only | One day of games |
+| `season` | `season_year` | All 2025 games |
+| `game-ids` | `game_ids` (space-separated gamePks) | `777944 777940 777943` |
+
+> **Phase 2 `.dat`** always uses `start_date` → `end_date` regardless of the mode selected.
+
+4. Click **"Run workflow"** — the pipeline runs in ~2 minutes.
+5. Download the **artifacts** from the completed workflow run:
 
 | Artifact | Contents |
 |----------|----------|
-| `phase1-csv-{mode}` | 57-column CSV box score file |
-| `phase2-dat-{date}` | Structured `.dat` text file |
-| `raw-json-api-responses` | Raw JSON from the MLB Stats API (audit trail) |
+| `phase1-csv-{mode}-{start_date}` | 57-column CSV box score file |
+| `phase2-dat-{start_date}` | Structured `.dat` text file(s) |
+| `raw-json-{start_date}` | Raw JSON from the MLB Stats API (audit trail) |
 
 ---
 
@@ -116,30 +139,30 @@ A: Yes — pull the image and run it:
 ```bash
 docker pull ghcr.io/poornimaramakrishnan/mlb-pipeline:latest
 
+# Date range (Phase 1 CSV)
+docker run --rm -v "$(pwd)/output:/app/output" \
+  ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
+  csv --start-date 2025-05-13 --end-date 2025-05-21
+
 # Single date
 docker run --rm -v "$(pwd)/output:/app/output" \
   ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-  csv --start-date 2025-04-01
-
-# Date range
-docker run --rm -v "$(pwd)/output:/app/output" \
-  ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-  csv --start-date 2025-04-01 --end-date 2025-04-07
+  csv --start-date 2025-05-13
 
 # Full season
 docker run --rm -v "$(pwd)/output:/app/output" \
   ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
   csv --season 2025
 
-# Specific games by ID
+# Specific games by gamePk
 docker run --rm -v "$(pwd)/output:/app/output" \
   ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-  csv --game-id 745456 745457 745458
+  csv --game-id 777944 777940 777943
 
 # .dat structured text
 docker run --rm -v "$(pwd)/output:/app/output" \
   ghcr.io/poornimaramakrishnan/mlb-pipeline:latest \
-  dat --date 2022-09-01
+  dat --date 2025-05-13
 ```
 
 ---
